@@ -326,7 +326,7 @@ class SettlementsAPI {
         return $result;
     }
     
-    private function getAggAcquisition($afseid) {
+    private function getAcquisition($afseid) {
         $task = [
             ':afseid' => $afseid
         ];
