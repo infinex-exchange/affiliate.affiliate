@@ -124,7 +124,7 @@ class SettlementsAPI {
             'acquisition' => $this -> getAggAcquisition(
                 $auth['uid'],
                 $row['month']
-            )
+            ),
             'refCoin' => $this -> refCoin
         ];
     }
