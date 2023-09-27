@@ -97,7 +97,7 @@ class Signup {
             else
                 $this -> log -> debug(
                     'Not registered affiliation uid='.$body['uid'].' to reflink='.$body['refid'].
-                    ' uid='.$row['uid'].' because reflink is inactive';
+                    ' uid='.$row['uid'].' because reflink is inactive'
                 );
             
             $task = array(
@@ -128,7 +128,7 @@ class Signup {
             while($row = $q -> fetch())
                 $this -> log -> debug(
                     'Registered affiliation uid='.$body['uid'].' to reflink='.$row['refid'].
-                    ' slave_level='.$row['slave_level'];
+                    ' slave_level='.$row['slave_level']
                 );
             
             $this -> pdo -> commit();
@@ -136,7 +136,7 @@ class Signup {
         else
             $this -> log -> debug(
                 'Not registered affiliation uid='.$body['uid'].' to reflink='.$body['refid'].
-                ' because not found refid';
+                ' because not found refid'
             );
     }
 }
