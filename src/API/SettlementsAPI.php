@@ -37,7 +37,7 @@ class SettlementsAPI {
         $pag = new Pagination\Offset(50, 500, $query);
         
         $task = array(
-            ':uid' => $auth['uid'];
+            ':uid' => $auth['uid']
         );
         if(isset($query['refid']))
             $task[':refid'] = $query['refid'];
