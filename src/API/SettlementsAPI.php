@@ -55,7 +55,7 @@ class SettlementsAPI {
             $sql .= ' AND reflinks.refid = :refid';
         
         $sql .= ' GROUP BY affiliate_settlements.month
-                  ORDER BY affiliate_settlements.month ASC'
+                  ORDER BY affiliate_settlements.month DESC'
              . $pag -> sql();
         
         $q = $this -> pdo -> prepare($sql);
@@ -148,7 +148,7 @@ class SettlementsAPI {
                        mastercoin_equiv
                 FROM affiliate_settlements
                 WHERE refid = :refid
-                ORDER BY month ASC'
+                ORDER BY month DESC'
              . $pag -> sql();
         
         $q = $this -> pdo -> prepare($sql);
