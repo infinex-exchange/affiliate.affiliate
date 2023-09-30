@@ -121,7 +121,7 @@ class ReflinksAPI {
                 AND refid != :refid
                 AND active = TRUE';
         
-        $q = $pdo -> prepare($sql);
+        $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
         $row = $q -> fetch(PDO::FETCH_ASSOC);
         
