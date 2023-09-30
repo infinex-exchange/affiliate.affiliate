@@ -264,7 +264,7 @@ class SettlementsAPI {
             $rewards[] = [
                 'type' => $row['reward_type'],
                 'slaveLevel' => $row['slave_level'],
-                'assetid' => $row['assetid'],
+                'asset' => $row['assetid'],
                 'amount' => trimFloat($row['reward'])
             ];
         }
