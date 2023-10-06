@@ -5,14 +5,17 @@ require_once __DIR__.'/validate.php';
 use Infinex\Exceptions\Error;
 use Infinex\Pagination;
 use function Infinex\Math\trimFloat;
+use React\Promise;
 
 class SettlementsAPI {
     private $log;
+    private $amqp;
     private $pdo;
     private $refCoin;
     
-    function __construct($log, $pdo, $refCoin) {
+    function __construct($log, $amqp, $pdo, $refCoin) {
         $this -> log = $log;
+        $this -> amqp = $amqp;
         $this -> pdo = $pdo;
         $this -> refCoin = $refCoin;
 
@@ -259,19 +262,40 @@ class SettlementsAPI {
         $q -> execute($task);
     
         $rewards = [];
+        $assetSymbols = [];
         
         while($row = $q -> fetch()) {
             $rewards[] = [
                 'type' => $row['reward_type'],
                 'slaveLevel' => $row['slave_level'],
-                'asset' => $row['assetid'],
                 'amount' => trimFloat($row['reward'])
             ];
+            
+            $assetSymbols[] = $row['assetid'];
         }
         
-        return [
-            'rewards' => $rewards
-        ];
+        $promises = [];
+        
+        foreach($assetSymbols as $k => $v)
+            $promises[] = $this -> amqp -> call(
+                'wallet.wallet',
+                'assetIdToSymbol',
+                [
+                    'symbol' => $v
+                ]
+            ) -> then(
+                function($data) use(&$rewards, $k) {
+                    $rewards[$k]['asset'] = $data['symbol'];
+                }
+            );
+        
+        return Promise\all($promises) -> then(
+            function() use($rewards) {
+                return [
+                    'rewards' => $rewards
+                ];
+            }
+        );
     }
     
     private function validateAndCheckRefid($refid, $uid) {
