@@ -290,7 +290,7 @@ class SettlementsAPI {
             );
         
         return Promise\all($promises) -> then(
-            function() use($rewards) {
+            function() use(&$rewards) {
                 return [
                     'rewards' => $rewards
                 ];
