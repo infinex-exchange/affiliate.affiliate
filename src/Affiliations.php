@@ -2,7 +2,6 @@
 
 use Infinex\Exceptions\Error;
 use Infinex\Pagination;
-use function Infinex\Math\trimFloat;
 use React\Promise;
 
 class Settlements {
@@ -10,14 +9,12 @@ class Settlements {
     private $amqp;
     private $pdo;
     private $reflinks;
-    private $refCoin;
     
-    function __construct($log, $amqp, $pdo, $reflinks, $refCoin) {
+    function __construct($log, $amqp, $pdo, $reflinks) {
         $this -> log = $log;
         $this -> amqp = $amqp;
         $this -> pdo = $pdo;
         $this -> reflinks = $reflinks;
-        $this -> refCoin = $refCoin;
 
         $this -> log -> debug('Initialized settlements manager');
     }
@@ -28,23 +25,28 @@ class Settlements {
         $promises = [];
         
         $promises[] = $this -> amqp -> method(
-            'getAggSettlements',
-            [$this, 'getAggSettlements']
+            'getReflinks',
+            [$this, 'getReflinks']
         );
         
         $promises[] = $this -> amqp -> method(
-            'getAggSettlement',
-            [$this, 'getAggSettlement']
+            'getReflink',
+            [$this, 'getReflink']
         );
         
         $promises[] = $this -> amqp -> method(
-            'getSettlements',
-            [$this, 'getSettlements']
+            'deleteReflink',
+            [$this, 'deleteReflink']
         );
         
         $promises[] = $this -> amqp -> method(
-            'getSettlement',
-            [$this, 'getSettlement']
+            'createReflink',
+            [$this, 'createReflink']
+        );
+        
+        $promises[] = $this -> amqp -> method(
+            'editReflink',
+            [$this, 'editReflink']
         );
         
         return Promise\all($promises) -> then(
@@ -64,10 +66,11 @@ class Settlements {
         
         $promises = [];
         
-        $promises[] = $this -> amqp -> unreg('getAggSettlements');
-        $promises[] = $this -> amqp -> unreg('getAggSettlement');
-        $promises[] = $this -> amqp -> unreg('getSettlements');
-        $promises[] = $this -> amqp -> unreg('getSettlement');
+        $promises[] = $this -> amqp -> unreg('getReflinks');
+        $promises[] = $this -> amqp -> unreg('getReflink');
+        $promises[] = $this -> amqp -> unreg('deleteReflink');
+        $promises[] = $this -> amqp -> unreg('createReflink');
+        $promises[] = $this -> amqp -> unreg('editReflink');
         
         return Promise\all($promises) -> then(
             function() use ($th) {
