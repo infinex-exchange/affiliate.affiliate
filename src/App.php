@@ -1,14 +1,20 @@
 <?php
 
-require __DIR__.'/Signup.php';
+require __DIR__.'/Reflinks.php';
+require __DIR__.'/Settlements.php';
+require __DIR__.'/Affiliations.php';
 
 require __DIR__.'/API/ReflinksAPI.php';
 require __DIR__.'/API/SettlementsAPI.php';
 
+use React\Promise;
+
 class App extends Infinex\App\App {
     private $pdo;
     
-    private $signup;
+    private $reflinks;
+    private $settlements;
+    private $affiliations;
     
     private $reflinksApi;
     private $settlementsApi;
@@ -26,22 +32,35 @@ class App extends Infinex\App\App {
             DB_NAME
         );
         
-        $this -> signup = new Signup(
+        $this -> reflinks = new Reflinks(
             $this -> log,
             $this -> amqp,
             $this -> pdo
+        );
+        
+        $this -> settlements = new Settlements(
+            $this -> log,
+            $this -> amqp,
+            $this -> pdo,
+            $this -> reflinks,
+            REFERENCE_COIN
+        );
+        
+        $this -> affiliations = new Affiliations(
+            $this -> log,
+            $this -> amqp,
+            $this -> pdo,
+            $this -> reflinks
         );
         
         $this -> reflinksApi = new ReflinksAPI(
             $this -> log,
-            $this -> pdo
+            $this -> reflinks
         );
         
         $this -> settlementsApi = new SettlementsAPI(
             $this -> log,
-            $this -> amqp,
-            $this -> pdo,
-            REFERENCE_COIN
+            $this -> settlements
         );
         
         $this -> rest = new Infinex\API\REST(
@@ -63,7 +82,14 @@ class App extends Infinex\App\App {
             }
         ) -> then(
             function() use($th) {
-                return $th -> signup -> start();
+                return $th -> reflinks -> start();
+            }
+        ) -> then(
+            function() use($th) {
+                return Promise\all([
+                    $th -> settlements -> start(),
+                    $th -> affiliations -> start()
+                ]);
             }
         ) -> then(
             function() use($th) {
@@ -81,7 +107,14 @@ class App extends Infinex\App\App {
         
         $this -> rest -> stop() -> then(
             function() use($th) {
-                return $th -> signup -> stop();
+                return Promise\all([
+                    $th -> settlements -> stop(),
+                    $th -> affiliations -> stop()
+                ]);
+            }
+        ) -> then(
+            function() use($th) {
+                return $th -> reflinks -> stop();
             }
         ) -> then(
             function() use($th) {

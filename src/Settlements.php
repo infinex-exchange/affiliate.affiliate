@@ -1,24 +1,89 @@
 <?php
 
 use Infinex\Exceptions\Error;
+use Infinex\Pagination;
+use function Infinex\Math\trimFloat;
+use React\Promise;
 
 class SettlementsAPI {
     private $log;
-    private $settlements;
+    private $amqp;
+    private $pdo;
+    private $reflinks;
+    private $refCoin;
     
-    function __construct($log, $settlements) {
+    function __construct($log, $amqp, $pdo, $reflinks, $refCoin) {
         $this -> log = $log;
-        $this -> settlements = $settlements;
+        $this -> amqp = $amqp;
+        $this -> pdo = $pdo;
+        $this -> reflinks = $reflinks;
+        $this -> refCoin = $refCoin;
 
-        $this -> log -> debug('Initialized settlements API');
+        $this -> log -> debug('Initialized settlements manager');
     }
     
-    public function initRoutes($rc) {
-        $rc -> get('/agg-settlements', [$this, 'getAggSettlements']);
-        $rc -> get('/agg-settlements/{year}/{month}', [$this, 'getAggSettlement']);
-        $rc -> get('/reflinks/{refid}/settlements', [$this, 'getSettlementsOfReflink']);
-        $rc -> get('/reflinks/{refid}/settlements/{afseid}', [$this, 'getSettlementOfReflink']);
-        $rc -> get('/reflinks/{refid}/settlements/{afseid}/rewards', [$this, 'getRewards']);
+    public function start() {
+        $th = $this;
+        
+        $promises = [];
+        
+        $promises[] = $this -> amqp -> method(
+            'getReflinks',
+            [$this, 'getReflinks']
+        );
+        
+        $promises[] = $this -> amqp -> method(
+            'getReflink',
+            [$this, 'getReflink']
+        );
+        
+        $promises[] = $this -> amqp -> method(
+            'deleteReflink',
+            [$this, 'deleteReflink']
+        );
+        
+        $promises[] = $this -> amqp -> method(
+            'createReflink',
+            [$this, 'createReflink']
+        );
+        
+        $promises[] = $this -> amqp -> method(
+            'editReflink',
+            [$this, 'editReflink']
+        );
+        
+        return Promise\all($promises) -> then(
+            function() use($th) {
+                $th -> log -> info('Started settlements manager');
+            }
+        ) -> catch(
+            function($e) use($th) {
+                $th -> log -> error('Failed to start settlements manager: '.((string) $e));
+                throw $e;
+            }
+        );
+    }
+    
+    public function stop() {
+        $th = $this;
+        
+        $promises = [];
+        
+        $promises[] = $this -> amqp -> unreg('getReflinks');
+        $promises[] = $this -> amqp -> unreg('getReflink');
+        $promises[] = $this -> amqp -> unreg('deleteReflink');
+        $promises[] = $this -> amqp -> unreg('createReflink');
+        $promises[] = $this -> amqp -> unreg('editReflink');
+        
+        return Promise\all($promises) -> then(
+            function() use ($th) {
+                $th -> log -> info('Stopped settlements manager');
+            }
+        ) -> catch(
+            function($e) use($th) {
+                $th -> log -> error('Failed to stop settlements manager: '.((string) $e));
+            }
+        );
     }
     
     public function getAggSettlements($path, $query, $body, $auth) {
