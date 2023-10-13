@@ -5,10 +5,12 @@ use Infinex\Exceptions\Error;
 class SettlementsAPI {
     private $log;
     private $settlements;
+    private $rewards;
     
-    function __construct($log, $settlements) {
+    function __construct($log, $settlements, $rewards) {
         $this -> log = $log;
         $this -> settlements = $settlements;
+        $this -> rewards = $rewards;
 
         $this -> log -> debug('Initialized settlements API');
     }
@@ -16,371 +18,123 @@ class SettlementsAPI {
     public function initRoutes($rc) {
         $rc -> get('/agg-settlements', [$this, 'getAggSettlements']);
         $rc -> get('/agg-settlements/{year}/{month}', [$this, 'getAggSettlement']);
-        $rc -> get('/reflinks/{refid}/settlements', [$this, 'getSettlementsOfReflink']);
-        $rc -> get('/reflinks/{refid}/settlements/{afseid}', [$this, 'getSettlementOfReflink']);
-        $rc -> get('/reflinks/{refid}/settlements/{afseid}/rewards', [$this, 'getRewards']);
+        $rc -> get('/settlements', [$this, 'getSettlements']);
+        $rc -> get('/settlements/{afseid}', [$this, 'getSettlement']);
+        $rc -> get('/settlements/{afseid}/rewards', [$this, 'getRewards']);
     }
     
     public function getAggSettlements($path, $query, $body, $auth) {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        if(isset($query['refid']))
-            $this -> validateAndCheckRefid($query['refid'], $auth['uid']);
-            
-        $pag = new Pagination\Offset(50, 500, $query);
+        $resp = $this -> settlements -> getAggSettlements([
+            'uid' => $auth['uid'],
+            'offset' => @$query['offset'],
+            'limit' => @$query['limit']
+        ]);
         
-        $task = array(
-            ':uid' => $auth['uid']
-        );
-        if(isset($query['refid']))
-            $task[':refid'] = $query['refid'];
+        foreach($resp['settlements'] as $k => $v)
+            $resp['settlements'][$k] = $this -> ptpAggSettlement($v);
         
-        $sql = 'SELECT extract(month from affiliate_settlements.month) as month_human,
-	               extract(year from affiliate_settlements.month) as year,
-	               affiliate_settlements.month,
-                   SUM(affiliate_settlements.mastercoin_equiv) AS mastercoin_equiv
-           FROM affiliate_settlements,
-                reflinks
-           WHERE affiliate_settlements.refid = reflinks.refid
-           AND reflinks.uid = :uid';
-    
-        if(isset($query['refid']))
-            $sql .= ' AND reflinks.refid = :refid';
-        
-        $sql .= ' GROUP BY affiliate_settlements.month
-                  ORDER BY affiliate_settlements.month DESC'
-             . $pag -> sql();
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        
-        $settlements = [];
-        
-        while($row = $q -> fetch()) {
-            if($pag -> iter()) break;
-            
-            $settlements[] = [
-                'month' => $row['month_human'],
-                'year' => $row['year'],
-                'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),
-                'acquisition' => $this -> getAggAcquisition(
-                    $auth['uid'],
-                    $row['month']
-                )
-            ];
-        }
-        
-        return [
-            'settlements' => $settlements,
-            'more' => $pag -> more,
-            'refCoin' => $this -> refCoin
-        ];
+        return $resp;
     }
     
     public function getAggSettlement($path, $query, $body, $auth) {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        if(!$this -> validateYear($path['year']))
-            throw new Error('VALIDATION_ERROR', 'year');
-        if(!$this -> validateMonth($path['month']))
-            throw new Error('VALIDATION_ERROR', 'month');
-        
-        $task = array(
-            ':uid' => $auth['uid'],
-            ':year' => $path['year'],
-            ':month' => $path['month']
+        return $this -> ptpAggSettlement(
+            $this -> settlements -> getAggSettlement([
+                'uid' => $auth['uid'],
+                'year' => $path['year'],
+                'month' => $path['month']
+            ])
         );
-        
-        $sql = 'SELECT extract(month from affiliate_settlements.month) as month_human,
-	               extract(year from affiliate_settlements.month) as year,
-	               affiliate_settlements.month,
-                   SUM(affiliate_settlements.mastercoin_equiv) AS mastercoin_equiv
-                FROM affiliate_settlements,
-                     reflinks
-                WHERE affiliate_settlements.refid = reflinks.refid
-                AND reflinks.uid = :uid
-                AND EXTRACT(month FROM affiliate_settlements.month) = :month
-                AND EXTRACT(year FROM affiliate_settlements.month) = :year';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row)
-            throw new Error('NOT_FOUND', 'No settlement for '.$path['month'].'/'.$path['year'], 404);
-        
-        return [
-            'month' => $row['month_human'],
-            'year' => $row['year'],
-            'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),
-            'acquisition' => $this -> getAggAcquisition(
-                $auth['uid'],
-                $row['month']
-            ),
-            'refCoin' => $this -> refCoin
-        ];
     }
     
-    public function getSettlementsOfReflink($path, $query, $body, $auth) {
+    public function getSettlements($path, $query, $body, $auth) {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        $this -> validateAndCheckRefid($path['refid'], $auth['uid']);
-            
-        $pag = new Pagination\Offset(50, 500, $query);
+        $resp = $this -> settlements -> getSettlements([
+            'uid' => $auth['uid'],
+            'active' => true,
+            'refid' => @$query['refid'],
+            'offset' => @$query['offset'],
+            'limit' => @$query['limit']
+        ]);
         
-        $task = array(
-            ':refid' => $path['refid']
-        );
+        foreach($resp['settlements'] as $k => $v)
+            $resp['settlements'][$k] = $this -> ptpSettlement($v);
         
-        $sql = 'SELECT afseid,
-                       extract(month from month) as month_human,
-	                   extract(year from month) as year,
-	                   month,
-                       mastercoin_equiv
-                FROM affiliate_settlements
-                WHERE refid = :refid
-                ORDER BY month DESC'
-             . $pag -> sql();
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        
-        $settlements = [];
-        
-        while($row = $q -> fetch()) {
-            if($pag -> iter()) break;
-            
-            $settlements[] = [
-                'afseid' => $row['afseid'],
-                'month' => $row['month_human'],
-                'year' => $row['year'],
-                'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),
-                'acquisition' => $this -> getAcquisition($row['afseid'])
-            ];
-        }
-        
-        return [
-            'settlements' => $settlements,
-            'more' => $pag -> more,
-            'refCoin' => $this -> refCoin
-        ];
+        return $resp;
     }
     
-    public function getSettlementOfReflink($path, $query, $body, $auth) {
+    public function getSettlement($path, $query, $body, $auth) {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        $this -> validateAndCheckRefid($path['refid'], $auth['uid']);
-        if(!$this -> validateAfseid($path['afseid']))
-            throw new Error('VALIDATION_ERROR', 'afseid');
-        
-        $task = array(
-            ':refid' => $path['refid'],
-            ':afseid' => $path['afseid']
+        return $this -> ptpSettlement(
+            $this -> settlements -> getSettlement([
+                'uid' => $auth['uid'],
+                'afseid' => $path['afseid'],
+                'active' => true
+            ])
         );
-        
-        $sql = 'SELECT afseid,
-                       extract(month from month) as month_human,
-	                   extract(year from month) as year,
-	                   month,
-                       mastercoin_equiv
-                FROM affiliate_settlements
-                WHERE refid = :refid
-                AND afseid = :afseid';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row)
-            throw new Error('NOT_FOUND', 'Settlement '.$path['afseid'].' not found', 404);
-        
-        return [
-            'afseid' => $path['afseid'],
-            'month' => $row['month_human'],
-            'year' => $row['year'],
-            'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),
-            'acquisition' => $this -> getAcquisition($path['afseid']),
-            'refCoin' => $this -> refCoin
-        ];
     }
     
     public function getRewards($path, $query, $body, $auth) {
+        $th = $this;
+        
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        $this -> validateAndCheckRefid($path['refid'], $auth['uid']);
-        if(!$this -> validateAfseid($path['afseid']))
-            throw new Error('VALIDATION_ERROR', 'afseid');
-            
-        // Check settlements exists
-        $task = array(
-            ':refid' => $path['refid'],
-            ':afseid' => $path['afseid']
-        );
-        
-        $sql = 'SELECT 1
-                FROM affiliate_settlements
-           WHERE refid = :refid
-           AND afseid = :afseid';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row)
-            throw new Error('NOT_FOUND', 'Settlement '.$path['afseid'].' not found', 404);
-        
-        // Get rewards
-        $task = [
-            ':afseid' => $path['afseid']
-        ];
-        
-        $sql = 'SELECT slave_level,
-				       reward,
-				       assetid,
-				       reward_type
-		        FROM affiliate_rewards
-                WHERE afseid = :afseid
-                ORDER BY reward_type ASC,
-                         slave_level ASC,
-                         assetid ASC';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-    
-        $rewards = [];
-        $assetSymbols = [];
-        
-        while($row = $q -> fetch()) {
-            $rewards[] = [
-                'type' => $row['reward_type'],
-                'slaveLevel' => $row['slave_level'],
-                'amount' => trimFloat($row['reward'])
-            ];
-            
-            $assetSymbols[] = $row['assetid'];
-        }
+        $resp = $this -> rewards -> getRewards([
+            'uid' => $auth['uid'],
+            'afseid' => $path['afseid'],
+            'active' => true
+        ]);
         
         $promises = [];
+        $mapAssets = [];
         
-        foreach($assetSymbols as $k => $v)
-            $promises[] = $this -> amqp -> call(
-                'wallet.wallet',
-                'assetIdToSymbol',
-                [
-                    'symbol' => $v
-                ]
-            ) -> then(
-                function($data) use(&$rewards, $k) {
-                    $rewards[$k]['asset'] = $data['symbol'];
-                }
-            );
+        foreach($resp['rewards'] as $record) {
+            $assetid = $record['assetid'];
+            
+            if(!array_key_exists($assetid, $mapAssets)) {
+                $mapAssets[$assetid] = null;
+                
+                $promises[] = $this -> amqp -> call(
+                    'wallet.wallet',
+                    'assetIdToSymbol',
+                    [
+                        'symbol' => $assetid
+                    ]
+                ) -> then(
+                    function($data) use(&$mapAssets, $assetid) {
+                        $mapAssets[$assetid] = $data['symbol'];
+                    }
+                );
+            }
+        }
         
         return Promise\all($promises) -> then(
-            function() use(&$rewards) {
-                return [
-                    'rewards' => $rewards
-                ];
+            function() use(&$mapAssets, $resp, $th) {
+                foreach($resp['rewards'] as $k => $v)
+                    $resp['rewards'][$k] = $th -> ptpReward($v, $mapAssets[ $v['assetid'] ]);
+                
+                return $resp;
             }
         );
     }
     
-    private function validateAndCheckRefid($refid, $uid) {
-        if(!validateRefid($refid))
-            throw new Error('VALIDATION_ERROR', 'refid', 400);
-            
-        $task = [
-            ':uid' => $uid,
-            ':refid' => $refid
+    private function ptpReward($record, $assetSymbol) {
+        return [
+            'type' => $record['type'],
+            'slaveLevel' => $record['slaveLevel'],
+            'amount' => $record['amount'],
+            'asset' => $assetSymbol
         ];
-        
-        $sql = 'SELECT 1
-                FROM reflinks
-                WHERE refid = :refid
-                AND uid = :uid
-                AND active = TRUE';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-    
-        if(!$row)
-            throw new Error('NOT_FOUND', 'Reflink '.$refid.' not found');
-    }
-    
-    private function getAggAcquisition($uid, $month) {
-        $task = [
-            ':uid' => $uid,
-            ':month' => $month
-        ];
-            
-        $sql = 'SELECT affiliate_slaves_snap.slave_level,
-                       SUM(affiliate_slaves_snap.slaves_count) AS slaves_count
-                FROM affiliate_slaves_snap,
-                     affiliate_settlements,
-                     reflinks
-                WHERE affiliate_slaves_snap.afseid = affiliate_settlements.afseid
-                AND affiliate_settlements.month = :month
-                AND affiliate_settlements.refid = reflinks.refid
-                AND reflinks.uid = :uid
-                GROUP BY affiliate_slaves_snap.slave_level
-	            ORDER BY affiliate_slaves_snap.slave_level ASC';
-	    
-	    $q = $this -> pdo -> prepare($sql);
-	    $q -> execute($task);
-	    
-        $result = [];
-        
-	    while($row = $q -> fetch())
-		    $result[ $row['slave_level'] ] = $row['slaves_count'];
-        
-        return $result;
-    }
-    
-    private function getAcquisition($afseid) {
-        $task = [
-            ':afseid' => $afseid
-        ];
-            
-        $sql = 'SELECT slave_level,
-                       slaves_count
-                FROM affiliate_slaves_snap
-                WHERE afseid = :afseid
-	            ORDER BY slave_level ASC';
-	    
-	    $q = $this -> pdo -> prepare($sql);
-	    $q -> execute($task);
-	    
-        $result = [];
-        
-	    while($row = $q -> fetch())
-		    $result[ $row['slave_level'] ] = $row['slaves_count'];
-        
-        return $result;
-    }
-    
-    private function validateYear($year) {
-        if(!is_int($year)) return false;
-        if($year < 2020) return false;
-        if($year > 9999) return false;
-        return true;
-    }
-    
-    private function validateMonth($month) {
-        if(!is_int($month)) return false;
-        if($month < 1) return false;
-        if($month > 12) return false;
-        return true;
-    }
-    
-    private function validateAfseid($afseid) {
-        if(!is_int($afseid)) return false;
-        if($afseid < 1) return false;
-        return true;
     }
 }
 

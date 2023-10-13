@@ -4,17 +4,19 @@ use Infinex\Exceptions\Error;
 use function Infinex\Math\trimFloat;
 use React\Promise;
 
-class Affiliations {
+class Rewards {
     private $log;
     private $amqp;
     private $pdo;
+    private $settlements;
     
-    function __construct($log, $amqp, $pdo) {
+    function __construct($log, $amqp, $pdo, $settlements) {
         $this -> log = $log;
         $this -> amqp = $amqp;
         $this -> pdo = $pdo;
+        $this -> settlements = $settlements;
 
-        $this -> log -> debug('Initialized affiliations manager');
+        $this -> log -> debug('Initialized rewards manager');
     }
     
     public function start() {
@@ -23,37 +25,17 @@ class Affiliations {
         $promises = [];
         
         $promises[] = $this -> amqp -> method(
-            'getReflinks',
-            [$this, 'getReflinks']
-        );
-        
-        $promises[] = $this -> amqp -> method(
-            'getReflink',
-            [$this, 'getReflink']
-        );
-        
-        $promises[] = $this -> amqp -> method(
-            'deleteReflink',
-            [$this, 'deleteReflink']
-        );
-        
-        $promises[] = $this -> amqp -> method(
-            'createReflink',
-            [$this, 'createReflink']
-        );
-        
-        $promises[] = $this -> amqp -> method(
-            'editReflink',
-            [$this, 'editReflink']
+            'getRewards',
+            [$this, 'getRewards']
         );
         
         return Promise\all($promises) -> then(
             function() use($th) {
-                $th -> log -> info('Started affiliations manager');
+                $th -> log -> info('Started rewards manager');
             }
         ) -> catch(
             function($e) use($th) {
-                $th -> log -> error('Failed to start affiliations manager: '.((string) $e));
+                $th -> log -> error('Failed to start rewards manager: '.((string) $e));
                 throw $e;
             }
         );
@@ -64,49 +46,32 @@ class Affiliations {
         
         $promises = [];
         
-        $promises[] = $this -> amqp -> unreg('getReflinks');
-        $promises[] = $this -> amqp -> unreg('getReflink');
-        $promises[] = $this -> amqp -> unreg('deleteReflink');
-        $promises[] = $this -> amqp -> unreg('createReflink');
-        $promises[] = $this -> amqp -> unreg('editReflink');
+        $promises[] = $this -> amqp -> unreg('getRewards');
         
         return Promise\all($promises) -> then(
             function() use ($th) {
-                $th -> log -> info('Stopped affiliations manager');
+                $th -> log -> info('Stopped rewards manager');
             }
         ) -> catch(
             function($e) use($th) {
-                $th -> log -> error('Failed to stop affiliations manager: '.((string) $e));
+                $th -> log -> error('Failed to stop rewards manager: '.((string) $e));
             }
         );
     }
     
     public function getRewards($body) {
-        $this -> validateAndCheckRefid($path['refid'], $auth['uid']);
-        if(!$this -> validateAfseid($path['afseid']))
-            throw new Error('VALIDATION_ERROR', 'afseid');
-            
-        // Check settlements exists
-        $task = array(
-            ':refid' => $path['refid'],
-            ':afseid' => $path['afseid']
-        );
+        if(!isset($body['afseid']))
+            throw new Error('MISSING_DATA', 'afseid', 400);
         
-        $sql = 'SELECT 1
-                FROM affiliate_settlements
-           WHERE refid = :refid
-           AND afseid = :afseid';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row)
-            throw new Error('NOT_FOUND', 'Settlement '.$path['afseid'].' not found', 404);
+        $this -> settlements -> getSettlement([
+            'afseid' => $body['afseid'],
+            'uid' => @$body['uid'],
+            'active' => @$body['active']
+        ]);
         
         // Get rewards
         $task = [
-            ':afseid' => $path['afseid']
+            ':afseid' => $body['afseid']
         ];
         
         $sql = 'SELECT slave_level,
@@ -123,40 +88,23 @@ class Affiliations {
         $q -> execute($task);
     
         $rewards = [];
-        $assetSymbols = [];
         
         while($row = $q -> fetch()) {
-            $rewards[] = [
-                'type' => $row['reward_type'],
-                'slaveLevel' => $row['slave_level'],
-                'amount' => trimFloat($row['reward'])
-            ];
-            
-            $assetSymbols[] = $row['assetid'];
+            $rewards[] = $this -> rtrReward($row);
         }
         
-        $promises = [];
-        
-        foreach($assetSymbols as $k => $v)
-            $promises[] = $this -> amqp -> call(
-                'wallet.wallet',
-                'assetIdToSymbol',
-                [
-                    'symbol' => $v
-                ]
-            ) -> then(
-                function($data) use(&$rewards, $k) {
-                    $rewards[$k]['asset'] = $data['symbol'];
-                }
-            );
-        
-        return Promise\all($promises) -> then(
-            function() use(&$rewards) {
-                return [
-                    'rewards' => $rewards
-                ];
-            }
-        );
+        return [
+            'rewards' => $rewards
+        ];
+    }
+    
+    private function rtrReward($row) {
+        return [
+            'type' => $row['reward_type'],
+            'slaveLevel' => $row['slave_level'],
+            'amount' => trimFloat($row['reward']),
+            'assetid' => $row['assetid']
+        ];
     }
 }
 

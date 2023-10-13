@@ -348,8 +348,8 @@ class Settlements {
             'year' => $row['year'],
             'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),
             'acquisition' => $this -> getAggAcquisition(
-                $uid,
-                $row['month']
+                $row['month'],
+                $uid
             )
         ];
     }
@@ -362,11 +362,59 @@ class Settlements {
             'month' => $row['month_human'],
             'year' => $row['year'],
             'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),
-            'acquisition' => $this -> getAggAcquisition(
-                $uid,
-                $row['month']
-            )
+            'acquisition' => $this -> getAcquisition($row['afseid'])
         ];
+    }
+    
+    private function getAggAcquisition($month, $uid) {
+        $task = [
+            ':uid' => $uid,
+            ':month' => $month
+        ];
+            
+        $sql = 'SELECT affiliate_slaves_snap.slave_level,
+                       SUM(affiliate_slaves_snap.slaves_count) AS slaves_count
+                FROM affiliate_slaves_snap,
+                     affiliate_settlements,
+                     reflinks
+                WHERE affiliate_slaves_snap.afseid = affiliate_settlements.afseid
+                AND affiliate_settlements.month = :month
+                AND affiliate_settlements.refid = reflinks.refid
+                AND reflinks.uid = :uid
+                GROUP BY affiliate_slaves_snap.slave_level
+	            ORDER BY affiliate_slaves_snap.slave_level ASC';
+	    
+	    $q = $this -> pdo -> prepare($sql);
+	    $q -> execute($task);
+	    
+        $result = [];
+        
+	    while($row = $q -> fetch())
+		    $result[ $row['slave_level'] ] = $row['slaves_count'];
+        
+        return $result;
+    }
+    
+    private function getAcquisition($afseid) {
+        $task = [
+            ':afseid' => $afseid
+        ];
+            
+        $sql = 'SELECT slave_level,
+                       slaves_count
+                FROM affiliate_slaves_snap
+                WHERE afseid = :afseid
+	            ORDER BY slave_level ASC';
+	    
+	    $q = $this -> pdo -> prepare($sql);
+	    $q -> execute($task);
+	    
+        $result = [];
+        
+	    while($row = $q -> fetch())
+		    $result[ $row['slave_level'] ] = $row['slaves_count'];
+        
+        return $result;
     }
 }
 

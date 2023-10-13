@@ -3,6 +3,7 @@
 require __DIR__.'/Reflinks.php';
 require __DIR__.'/Settlements.php';
 require __DIR__.'/Affiliations.php';
+require __DIR__.'/Rewards.php';
 
 require __DIR__.'/API/ReflinksAPI.php';
 require __DIR__.'/API/SettlementsAPI.php';
@@ -15,6 +16,7 @@ class App extends Infinex\App\App {
     private $reflinks;
     private $settlements;
     private $affiliations;
+    private $rewards;
     
     private $reflinksApi;
     private $settlementsApi;
@@ -52,6 +54,14 @@ class App extends Infinex\App\App {
             $this -> pdo,
             $this -> reflinks
         );
+        $this -> reflinks -> setAffiliations($this -> affiliations);
+        
+        $this -> rewards = new Rewards(
+            $this -> log,
+            $this -> amqp,
+            $this -> pdo,
+            $this -> settlements
+        );
         
         $this -> reflinksApi = new ReflinksAPI(
             $this -> log,
@@ -60,7 +70,8 @@ class App extends Infinex\App\App {
         
         $this -> settlementsApi = new SettlementsAPI(
             $this -> log,
-            $this -> settlements
+            $this -> settlements,
+            $this -> rewards
         );
         
         $this -> rest = new Infinex\API\REST(
@@ -93,6 +104,10 @@ class App extends Infinex\App\App {
             }
         ) -> then(
             function() use($th) {
+                return $th -> rewards -> start();
+            }
+        ) -> then(
+            function() use($th) {
                 return $th -> rest -> start();
             }
         ) -> catch(
@@ -111,6 +126,10 @@ class App extends Infinex\App\App {
                     $th -> settlements -> stop(),
                     $th -> affiliations -> stop()
                 ]);
+            }
+        ) -> then(
+            function() use($th) {
+                return $th -> rewards -> stop();
             }
         ) -> then(
             function() use($th) {

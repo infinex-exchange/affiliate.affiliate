@@ -1,10 +1,9 @@
 <?php
 
 use Infinex\Exceptions\Error;
-use Infinex\Pagination;
 use React\Promise;
 
-class Settlements {
+class Affiliations {
     private $log;
     private $amqp;
     private $pdo;
@@ -16,7 +15,7 @@ class Settlements {
         $this -> pdo = $pdo;
         $this -> reflinks = $reflinks;
 
-        $this -> log -> debug('Initialized settlements manager');
+        $this -> log -> debug('Initialized affiliations manager');
     }
     
     public function start() {
@@ -24,38 +23,23 @@ class Settlements {
         
         $promises = [];
         
-        $promises[] = $this -> amqp -> method(
-            'getReflinks',
-            [$this, 'getReflinks']
-        );
-        
-        $promises[] = $this -> amqp -> method(
-            'getReflink',
-            [$this, 'getReflink']
-        );
-        
-        $promises[] = $this -> amqp -> method(
-            'deleteReflink',
-            [$this, 'deleteReflink']
-        );
-        
-        $promises[] = $this -> amqp -> method(
-            'createReflink',
-            [$this, 'createReflink']
-        );
-        
-        $promises[] = $this -> amqp -> method(
-            'editReflink',
-            [$this, 'editReflink']
+        $promises[] = $this -> amqp -> sub(
+            'registerUser',
+            [$this, 'registerUser'],
+            'affiliate_signup',
+            true,
+            [
+                'affiliation' => true
+            ]
         );
         
         return Promise\all($promises) -> then(
             function() use($th) {
-                $th -> log -> info('Started settlements manager');
+                $th -> log -> info('Started affiliations manager');
             }
         ) -> catch(
             function($e) use($th) {
-                $th -> log -> error('Failed to start settlements manager: '.((string) $e));
+                $th -> log -> error('Failed to start affiliations manager: '.((string) $e));
                 throw $e;
             }
         );
@@ -66,310 +50,132 @@ class Settlements {
         
         $promises = [];
         
-        $promises[] = $this -> amqp -> unreg('getReflinks');
-        $promises[] = $this -> amqp -> unreg('getReflink');
-        $promises[] = $this -> amqp -> unreg('deleteReflink');
-        $promises[] = $this -> amqp -> unreg('createReflink');
-        $promises[] = $this -> amqp -> unreg('editReflink');
+        $promises[] = $this -> amqp -> unsub('affiliate_signup');
         
         return Promise\all($promises) -> then(
             function() use ($th) {
-                $th -> log -> info('Stopped settlements manager');
+                $th -> log -> info('Stopped affiliations manager');
             }
         ) -> catch(
             function($e) use($th) {
-                $th -> log -> error('Failed to stop settlements manager: '.((string) $e));
+                $th -> log -> error('Failed to stop affiliations manager: '.((string) $e));
             }
         );
     }
     
-    public function getAggSettlements($body) {
-        if(!isset($body['uid']))
-            throw new Error('MISSING_DATA', 'uid', 400);
-            
-        $pag = new Pagination\Offset(50, 500, $body);
-        
-        $task = array(
-            ':uid' => $body['uid']
-        );
-        
-        $sql = 'SELECT extract(month from affiliate_settlements.month) as month_human,
-	               extract(year from affiliate_settlements.month) as year,
-	               affiliate_settlements.month,
-                   SUM(affiliate_settlements.mastercoin_equiv) AS mastercoin_equiv
-           FROM affiliate_settlements,
-                reflinks
-           WHERE affiliate_settlements.refid = reflinks.refid
-           AND reflinks.uid = :uid';
-        
-        $sql .= ' GROUP BY affiliate_settlements.month
-                  ORDER BY affiliate_settlements.month DESC'
-             . $pag -> sql();
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        
-        $settlements = [];
-        
-        while($row = $q -> fetch()) {
-            if($pag -> iter()) break;
-            $settlements[] = $this -> rtrAggSettlement($row, $body['uid']);
+    public function setupAccount($body) {
+        if(!isset($body['uid'])) {
+            $this -> log -> error('registerUser without uid');
+            return;
         }
         
-        return [
-            'settlements' => $settlements,
-            'more' => $pag -> more,
-            'refCoin' => $this -> refCoin
-        ];
-    }
-    
-    public function getAggSettlement($body) {
-        if(!isset($body['uid']))
-            throw new Error('MISSING_DATA', 'uid', 400);
-        if(!isset($body['year']))
-            throw new Error('MISSING_DATA', 'year', 400);
-        if(!isset($body['month']))
-            throw new Error('MISSING_DATA', 'month', 400);
+        if(!isset($body['refid'])) {
+            $this -> log -> error('registerUser without refid');
+            return;
+        }
         
-        if(!$this -> validateYear($body['year']))
-            throw new Error('VALIDATION_ERROR', 'year');
-        if(!$this -> validateMonth($body['month']))
-            throw new Error('VALIDATION_ERROR', 'month');
-        
-        $task = array(
-            ':uid' => $body['uid'],
-            ':year' => $body['year'],
-            ':month' => $body['month']
-        );
-        
-        $sql = 'SELECT extract(month from affiliate_settlements.month) as month_human,
-	               extract(year from affiliate_settlements.month) as year,
-	               affiliate_settlements.month,
-                   SUM(affiliate_settlements.mastercoin_equiv) AS mastercoin_equiv
-                FROM affiliate_settlements,
-                     reflinks
-                WHERE affiliate_settlements.refid = reflinks.refid
-                AND reflinks.uid = :uid
-                AND EXTRACT(month FROM affiliate_settlements.month) = :month
-                AND EXTRACT(year FROM affiliate_settlements.month) = :year';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row)
-            throw new Error('NOT_FOUND', 'No settlement for '.$body['month'].'/'.$body['year'], 404);
-        
-        $resp = $this -> rtrAggSettlement($row, $body['uid']);
-        $resp['refCoin'] = $this -> refCoin;
-        return $resp;
-    }
-    
-    public function getSettlements($body) {
-        if(isset($body['active']) && !is_bool($body['active']))
-            throw new Error('VALIDATION_ERROR', 'active', 400);
-        
-        if(isset($body['refid']))
-            $this -> reflinks -> getReflink([
-                'refid' => $query['refid'],
-                'uid' => @$body['uid'],
-                'active' => @$body['active']
+        try {
+            $reflink = $this -> reflinks -> getReflink([
+                'refid' => $body['refid']
             ]);
+        }
+        catch(Error $e) {
+            $this -> log -> warn(
+                'Not registered affiliation uid='.$body['uid'].' to reflink='.$body['refid'].
+                ': '.((string) $e);
+            );
+            return;
+        }
+        
+        $this -> pdo -> beginTransaction();
+        
+        if($refid['active']) {
+            $task = array(
+                ':refid' => $body['refid'],
+                ':slave_uid' => $body['uid']
+            );
             
-        $pag = new Pagination\Offset(50, 500, $body);
-        
-        $task = [];
-        
-        $sql = 'SELECT affiliate_settlements.afseid,
-                       affiliate_settlements.refid,
-                       extract(month from affiliate_settlements.month) as month_human,
-    	               extract(year from affiliate_settlements.month) as year,
-    	               affiliate_settlements.month,
-                       affiliate_settlements.mastercoin_equiv
-                FROM affiliate_settlements';
-        
-        if(isset($body['refid'])) {
-            $task[':refid'] = $body['refid'];
-            $sql .= ' WHERE affiliate_settlements.refid = :refid';
-        }
-        else if(isset($body['uid'])) {
-            $task[':uid'] = $body['uid'];
-            $sql .= ', reflinks
-                     WHERE reflinks.refid = affiliate_settlements.refid
-                     AND reflinks.uid = :uid';
-            if(isset($body['active'])) {
-                $task[':active'] = $body['active'] ? 1 : 0;
-                $sql .= ' AND reflinks.active = :active';
-            }
-        }
-        
-        $sql .= ' ORDER BY affiliate_settlements.afseid DESC'
-             . $pag -> sql();
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        
-        $settlements = [];
-        
-        while($row = $q -> fetch()) {
-            if($pag -> iter()) break;
-            $settlements[] = $this -> rtrSettlement($row);
-        }
-        
-        return [
-            'settlements' => $settlements,
-            'more' => $pag -> more,
-            'refCoin' => $this -> refCoin
-        ];
-    }
-    
-    public function getSettlement($body) {
-        if(!isset($body['afseid']))
-            throw new Error('MISSING_DATA', 'afseid', 400);
-        
-        if(!$this -> validateAfseid($body['afseid']))
-            throw new Error('VALIDATION_ERROR', 'afseid', 400);
+            $sql = 'INSERT INTO affiliations(
+                        refid,
+                        slave_uid,
+                        slave_level
+                    )
+                    VALUES(
+                        :refid,
+                        :slave_uid,
+                        1
+                    )';
             
-        if(isset($body['active']) && !is_bool($body['active']))
-            throw new Error('VALIDATION_ERROR', 'active', 400);
-        
-        $task = [
-            ':afseid' => $body['afseid']
-        ];
-        
-        $sql = 'SELECT affiliate_settlements.afseid,
-                       affiliate_settlements.refid,
-                       extract(month from affiliate_settlements.month) as month_human,
-    	               extract(year from affiliate_settlements.month) as year,
-    	               affiliate_settlements.month,
-                       affiliate_settlements.mastercoin_equiv
-                FROM affiliate_settlements';
-        
-        if(isset($body['uid']) || isset($body['active']))
-            $sql .= ', reflinks WHERE reflinks.refid = affiliate_settlements.refid';
+            $q = $this -> pdo -> prepare($sql);
+            $q -> execute($task);
+            
+            $this -> log -> debug(
+                'Registered affiliation uid='.$body['uid'].' to reflink='.$body['refid'].
+                ' uid='.$reflink['uid']
+            );
+        }
         else
-            $sql .= ' WHERE 1=1';
+            $this -> log -> debug(
+                'Not registered affiliation uid='.$body['uid'].' to reflink='.$body['refid'].
+                ' uid='.$reflink['uid'].' because reflink is inactive'
+            );
         
-        $sql .= ' AND affiliate_settlements.afseid = :afseid';
-            
-        if(isset($body['uid'])) {
-            $task[':uid'] = $body['uid'];
-            $sql .= ' AND reflinks.uid = :uid';
-        }
+        $task = array(
+            ':slave_uid' => $body['uid'],
+            ':master_uid' => $reflink['uid']
+        );
         
-        if(isset($body['active'])) {
-            $task[':active'] = $body['active'] ? 1 : 0;
-            $sql .= ' AND reflinks.active = :active';
-        }
-        
+        $sql = 'INSERT INTO affiliations(
+                    refid,
+                    slave_uid,
+                    slave_level
+                )
+                SELECT affiliations.refid,
+                       :slave_uid,
+                       affiliations.slave_level + 1
+                FROM affiliations,
+                     reflinks
+                WHERE affiliations.refid = reflinks.refid
+                AND affiliations.slave_level <= 3
+                AND affiliations.slave_uid = :master_uid
+                AND reflinks.active = TRUE
+                RETURNING affiliations.refid,
+                          affiliations.slave_level';
+    
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
-        $row = $q -> fetch();
         
-        if(!$row)
-            throw new Error('NOT_FOUND', 'Settlement '.$body['afseid'].' not found', 404);
+        while($row = $q -> fetch())
+            $this -> log -> debug(
+                'Registered affiliation uid='.$body['uid'].' to reflink='.$row['refid'].
+                ' slave_level='.$row['slave_level']
+            );
         
-        $resp = $this -> rtrSettlement($row);
-        $resp['refCoin'] = $this -> refCoin;
-        return $resp;
+        $this -> pdo -> commit();  
     }
     
-    private function getAggAcquisition($uid, $month) {
-        $task = [
-            ':uid' => $uid,
-            ':month' => $month
-        ];
-            
-        $sql = 'SELECT affiliate_slaves_snap.slave_level,
-                       SUM(affiliate_slaves_snap.slaves_count) AS slaves_count
-                FROM affiliate_slaves_snap,
-                     affiliate_settlements,
-                     reflinks
-                WHERE affiliate_slaves_snap.afseid = affiliate_settlements.afseid
-                AND affiliate_settlements.month = :month
-                AND affiliate_settlements.refid = reflinks.refid
-                AND reflinks.uid = :uid
-                GROUP BY affiliate_slaves_snap.slave_level
-	            ORDER BY affiliate_slaves_snap.slave_level ASC';
-	    
-	    $q = $this -> pdo -> prepare($sql);
-	    $q -> execute($task);
-	    
+    public function countMembers($refid) {
         $result = [];
         
-	    while($row = $q -> fetch())
-		    $result[ $row['slave_level'] ] = $row['slaves_count'];
-        
-        return $result;
-    }
-    
-    private function getAcquisition($afseid) {
-        $task = [
-            ':afseid' => $afseid
-        ];
+        for($i = 1; $i <= 4; $i++) {
+            $task = array(
+                ':slave_level' => $i,
+                ':refid' => $refid
+            );
             
-        $sql = 'SELECT slave_level,
-                       slaves_count
-                FROM affiliate_slaves_snap
-                WHERE afseid = :afseid
-	            ORDER BY slave_level ASC';
-	    
-	    $q = $this -> pdo -> prepare($sql);
-	    $q -> execute($task);
-	    
-        $result = [];
-        
-	    while($row = $q -> fetch())
-		    $result[ $row['slave_level'] ] = $row['slaves_count'];
+            $sql = 'SELECT COUNT(slave_uid) AS count
+                    FROM affiliations
+                    WHERE refid = :refid
+                    AND slave_level = :slave_level';
+            
+            $q = $this -> pdo -> prepare($sql);
+            $q -> execute($task);
+            $row = $q -> fetch();
+            
+            $result[$i] = $row['count'];
+        }
         
         return $result;
-    }
-    
-    private function validateYear($year) {
-        if(!is_int($year)) return false;
-        if($year < 2020) return false;
-        if($year > 9999) return false;
-        return true;
-    }
-    
-    private function validateMonth($month) {
-        if(!is_int($month)) return false;
-        if($month < 1) return false;
-        if($month > 12) return false;
-        return true;
-    }
-    
-    private function validateAfseid($afseid) {
-        if(!is_int($afseid)) return false;
-        if($afseid < 1) return false;
-        return true;
-    }
-    
-    private function rtrAggSettlement($row, $uid) {
-        return [
-            'month' => $row['month_human'],
-            'year' => $row['year'],
-            'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),
-            'acquisition' => $this -> getAggAcquisition(
-                $uid,
-                $row['month']
-            )
-        ];
-    }
-    
-    private function rtrSettlement($row) {
-        return [
-            'afseid' => $row['afseid'],
-            'refid' => $row['refid'],
-            'uid' => $row['uid'],
-            'month' => $row['month_human'],
-            'year' => $row['year'],
-            'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),
-            'acquisition' => $this -> getAggAcquisition(
-                $uid,
-                $row['month']
-            )
-        ];
     }
 }
 

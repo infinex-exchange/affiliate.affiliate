@@ -8,6 +8,7 @@ class Reflinks {
     private $log;
     private $amqp;
     private $pdo;
+    private $affiliations;
     
     function __construct($log, $amqp, $pdo) {
         $this -> log = $log;
@@ -15,6 +16,10 @@ class Reflinks {
         $this -> pdo = $pdo;
         
         $this -> log -> debug('Initialized reflinks manager');
+    }
+    
+    public function setAffiliations($affiliations) {
+        $this -> affiliations = $affiliations;
     }
     
     public function start() {
@@ -345,33 +350,11 @@ class Reflinks {
             'refid' => $row['refid'],
             'uid' => $row['uid'],
             'description' => $row['description'],
-            'members' => $this -> getMembers($row['refid'])
+            'members' => $this -> affiliations -> countMembers($row['refid'])
         ];
     }
     
-    private function getMembers($refid) {
-        $result = [];
-        
-        for($i = 1; $i <= 4; $i++) {
-            $task = array(
-                ':slave_level' => $i,
-                ':refid' => $refid
-            );
-            
-            $sql = 'SELECT COUNT(slave_uid) AS count
-                    FROM affiliations
-                    WHERE refid = :refid
-                    AND slave_level = :slave_level';
-            
-            $q = $this -> pdo -> prepare($sql);
-            $q -> execute($task);
-            $row = $q -> fetch();
-            
-            $result[$i] = $row['count'];
-        }
-        
-        return $result;
-    }
+    
 }
 
 ?>
