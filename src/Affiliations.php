@@ -82,7 +82,7 @@ class Affiliations {
         catch(Error $e) {
             $this -> log -> warn(
                 'Not registered affiliation uid='.$body['uid'].' to reflink='.$body['refid'].
-                ': '.((string) $e);
+                ': '.((string) $e)
             );
             return;
         }
