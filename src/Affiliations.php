@@ -25,7 +25,7 @@ class Affiliations {
         
         $promises[] = $this -> amqp -> sub(
             'registerUser',
-            [$this, 'registerUser'],
+            [$this, 'setupAccount'],
             'affiliate_signup',
             true,
             [
