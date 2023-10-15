@@ -358,7 +358,6 @@ class Settlements {
         return [
             'afseid' => $row['afseid'],
             'refid' => $row['refid'],
-            'uid' => $row['uid'],
             'month' => $row['month_human'],
             'year' => $row['year'],
             'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),

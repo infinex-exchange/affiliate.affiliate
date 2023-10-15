@@ -128,6 +128,26 @@ class SettlementsAPI {
         );
     }
     
+    private function ptpAggSettlement($record) {
+        return [
+            'month' => $record['month'],
+            'year' => $record['year'],
+            'refCoinEquiv' => $record['refCoinEquiv'],
+            'acquisition' => $record['acquisition']
+        ];
+    }
+    
+    private function ptpSettlement($record) {
+        return [
+            'afseid' => $record['afseid'],
+            'refid' => $record['refid'],
+            'month' => $record['month'],
+            'year' => $record['year'],
+            'refCoinEquiv' => $record['refCoinEquiv'],
+            'acquisition' => $record['acquisition']
+        ];
+    }
+    
     private function ptpReward($record, $assetSymbol) {
         return [
             'type' => $record['type'],
