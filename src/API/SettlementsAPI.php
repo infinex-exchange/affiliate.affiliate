@@ -114,8 +114,8 @@ class SettlementsAPI {
                         'assetid' => $assetid
                     ]
                 ) -> then(
-                    function($data) use(&$mapAssets, $assetid) {
-                        $mapAssets[$assetid] = $data['symbol'];
+                    function($symbol) use(&$mapAssets, $assetid) {
+                        $mapAssets[$assetid] = $symbol;
                     }
                 );
             }
