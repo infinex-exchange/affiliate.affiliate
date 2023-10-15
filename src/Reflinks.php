@@ -179,7 +179,7 @@ class Reflinks {
             throw new Error('VALIDATION_ERROR', 'refid', 400);
     
         $task = array(
-            ':refid' => $path['refid']
+            ':refid' => $body['refid']
         );
         
         $sql = 'UPDATE reflinks
