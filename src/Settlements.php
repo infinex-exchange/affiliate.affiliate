@@ -348,8 +348,8 @@ class Settlements {
             'year' => $row['year'],
             'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),
             'acquisition' => $this -> getAggAcquisition(
-                $row['month'],
-                $uid
+                $uid,
+                $row['month']
             )
         ];
     }
