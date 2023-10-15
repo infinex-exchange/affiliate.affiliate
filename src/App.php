@@ -70,6 +70,7 @@ class App extends Infinex\App\App {
         
         $this -> settlementsApi = new SettlementsAPI(
             $this -> log,
+            $this -> amqp,
             $this -> settlements,
             $this -> rewards
         );

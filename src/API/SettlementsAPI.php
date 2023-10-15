@@ -4,11 +4,13 @@ use Infinex\Exceptions\Error;
 
 class SettlementsAPI {
     private $log;
+    private $amqp;
     private $settlements;
     private $rewards;
     
-    function __construct($log, $settlements, $rewards) {
+    function __construct($log, $amqp, $settlements, $rewards) {
         $this -> log = $log;
+        $this -> amqp = $amqp;
         $this -> settlements = $settlements;
         $this -> rewards = $rewards;
 
