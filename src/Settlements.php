@@ -168,7 +168,7 @@ class Settlements {
         
         if(isset($body['refid']))
             $this -> reflinks -> getReflink([
-                'refid' => $query['refid'],
+                'refid' => $body['refid'],
                 'uid' => @$body['uid'],
                 'active' => @$body['active']
             ]);
