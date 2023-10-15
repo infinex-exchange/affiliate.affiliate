@@ -345,7 +345,7 @@ class Reflinks {
         return preg_match('/^[a-zA-Z0-9 ]{1,255}$/', $desc);
     }
     
-    private function rtrReflinks($row) {
+    private function rtrReflink($row) {
         return [
             'refid' => $row['refid'],
             'uid' => $row['uid'],
