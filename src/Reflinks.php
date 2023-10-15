@@ -254,7 +254,7 @@ class Reflinks {
         return $row['refid'];
     }
     
-    public function editReflink($path, $query, $body, $auth) {
+    public function editReflink($body) {
         if(!isset($body['refid']))
             throw new Error('MISSING_DATA', 'refid', 400);
         if(!isset($body['description']))
