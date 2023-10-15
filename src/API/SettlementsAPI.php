@@ -111,7 +111,7 @@ class SettlementsAPI {
                     'wallet.wallet',
                     'assetIdToSymbol',
                     [
-                        'symbol' => $assetid
+                        'assetid' => $assetid
                     ]
                 ) -> then(
                     function($data) use(&$mapAssets, $assetid) {
