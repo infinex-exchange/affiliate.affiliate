@@ -2,6 +2,7 @@
 
 use Infinex\Exceptions\Error;
 use Infinex\Pagination;
+use function Infinex\Validation\validateId;
 use function Infinex\Math\trimFloat;
 use React\Promise;
 
@@ -9,14 +10,12 @@ class Settlements {
     private $log;
     private $amqp;
     private $pdo;
-    private $reflinks;
     private $refCoin;
     
-    function __construct($log, $amqp, $pdo, $reflinks, $refCoin) {
+    function __construct($log, $amqp, $pdo, $refCoin) {
         $this -> log = $log;
         $this -> amqp = $amqp;
         $this -> pdo = $pdo;
-        $this -> reflinks = $reflinks;
         $this -> refCoin = $refCoin;
 
         $this -> log -> debug('Initialized settlements manager');
@@ -82,7 +81,10 @@ class Settlements {
     
     public function getAggSettlements($body) {
         if(!isset($body['uid']))
-            throw new Error('MISSING_DATA', 'uid', 400);
+            throw new Error('MISSING_DATA', 'uid');
+        
+        if(!validateId($body['uid']))
+            throw new Error('VALIDATION_ERROR', 'uid');
             
         $pag = new Pagination\Offset(50, 500, $body);
         
@@ -122,12 +124,14 @@ class Settlements {
     
     public function getAggSettlement($body) {
         if(!isset($body['uid']))
-            throw new Error('MISSING_DATA', 'uid', 400);
+            throw new Error('MISSING_DATA', 'uid');
         if(!isset($body['year']))
             throw new Error('MISSING_DATA', 'year', 400);
         if(!isset($body['month']))
             throw new Error('MISSING_DATA', 'month', 400);
         
+        if(!validateId($body['uid']))
+            throw new Error('VALIDATION_ERROR', 'uid');
         if(!$this -> validateYear($body['year']))
             throw new Error('VALIDATION_ERROR', 'year');
         if(!$this -> validateMonth($body['month']))
@@ -162,16 +166,17 @@ class Settlements {
         return $resp;
     }
     
-    public function getSettlements($body) {
-        if(isset($body['active']) && !is_bool($body['active']))
-            throw new Error('VALIDATION_ERROR', 'active', 400);
-        
-        if(isset($body['refid']))
-            $this -> reflinks -> getReflink([
-                'refid' => $body['refid'],
-                'uid' => @$body['uid'],
-                'active' => @$body['active']
-            ]);
+    public function getSettlements($body) {    
+        if(isset($body['uid']) && isset($body['refid']))
+            throw new Error('ARGUMENTS_CONFLICT', 'Both uid and refid are set');
+        else if(isset($body['uid'])) {
+            if(!validateId($body['uid']))
+                throw new Error('VALIDATION_ERROR', 'uid');
+        }
+        else if(isset($body['refid'])) {
+            if(!validateId($body['refid']))
+                throw new Error('VALIDATION_ERROR', 'refid', 400);
+        }
             
         $pag = new Pagination\Offset(50, 500, $body);
         
@@ -182,22 +187,19 @@ class Settlements {
                        extract(month from affiliate_settlements.month) as month_human,
     	               extract(year from affiliate_settlements.month) as year,
     	               affiliate_settlements.month,
-                       affiliate_settlements.mastercoin_equiv
-                FROM affiliate_settlements';
+                       affiliate_settlements.mastercoin_equiv,
+                       reflinks.uid
+                FROM affiliate_settlements,
+                     reflinks
+                WHERE reflinks.refid = affiliate_settlements.refid';
         
         if(isset($body['refid'])) {
             $task[':refid'] = $body['refid'];
-            $sql .= ' WHERE affiliate_settlements.refid = :refid';
+            $sql .= ' AND affiliate_settlements.refid = :refid';
         }
         else if(isset($body['uid'])) {
             $task[':uid'] = $body['uid'];
-            $sql .= ', reflinks
-                     WHERE reflinks.refid = affiliate_settlements.refid
-                     AND reflinks.uid = :uid';
-            if(isset($body['active'])) {
-                $task[':active'] = $body['active'] ? 1 : 0;
-                $sql .= ' AND reflinks.active = :active';
-            }
+            $sql .= ' AND reflinks.uid = :uid';
         }
         
         $sql .= ' ORDER BY affiliate_settlements.afseid DESC'
@@ -224,11 +226,8 @@ class Settlements {
         if(!isset($body['afseid']))
             throw new Error('MISSING_DATA', 'afseid', 400);
         
-        if(!$this -> validateAfseid($body['afseid']))
+        if(!validateId($body['afseid']))
             throw new Error('VALIDATION_ERROR', 'afseid', 400);
-            
-        if(isset($body['active']) && !is_bool($body['active']))
-            throw new Error('VALIDATION_ERROR', 'active', 400);
         
         $task = [
             ':afseid' => $body['afseid']
@@ -239,25 +238,12 @@ class Settlements {
                        extract(month from affiliate_settlements.month) as month_human,
     	               extract(year from affiliate_settlements.month) as year,
     	               affiliate_settlements.month,
-                       affiliate_settlements.mastercoin_equiv
-                FROM affiliate_settlements';
-        
-        if(isset($body['uid']) || isset($body['active']))
-            $sql .= ', reflinks WHERE reflinks.refid = affiliate_settlements.refid';
-        else
-            $sql .= ' WHERE 1=1';
-        
-        $sql .= ' AND affiliate_settlements.afseid = :afseid';
-            
-        if(isset($body['uid'])) {
-            $task[':uid'] = $body['uid'];
-            $sql .= ' AND reflinks.uid = :uid';
-        }
-        
-        if(isset($body['active'])) {
-            $task[':active'] = $body['active'] ? 1 : 0;
-            $sql .= ' AND reflinks.active = :active';
-        }
+                       affiliate_settlements.mastercoin_equiv,
+                       reflinks.uid
+                FROM affiliate_settlements,
+                     reflinks
+                WHERE reflinks.refid = affiliate_settlements.refid
+                AND affiliate_settlements.afseid = :afseid';
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
@@ -336,12 +322,6 @@ class Settlements {
         return true;
     }
     
-    private function validateAfseid($afseid) {
-        if(!is_int($afseid)) return false;
-        if($afseid < 1) return false;
-        return true;
-    }
-    
     private function rtrAggSettlement($row, $uid) {
         return [
             'month' => $row['month_human'],
@@ -358,6 +338,7 @@ class Settlements {
         return [
             'afseid' => $row['afseid'],
             'refid' => $row['refid'],
+            'uid' => $row['uid'],
             'month' => $row['month_human'],
             'year' => $row['year'],
             'refCoinEquiv' => trimFloat($row['mastercoin_equiv']),

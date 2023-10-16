@@ -1,6 +1,7 @@
 <?php
 
 use Infinex\Exceptions\Error;
+use function Infinex\Validation\validateId;
 use React\Promise;
 
 class Affiliations {
@@ -65,12 +66,20 @@ class Affiliations {
     
     public function setupAccount($body) {
         if(!isset($body['uid'])) {
-            $this -> log -> error('registerUser without uid');
+            $this -> log -> error('Ignoring registerUser without uid');
+            return;
+        }
+        if(!isset($body['refid'])) {
+            $this -> log -> error('Ignoring registerUser without refid');
             return;
         }
         
-        if(!isset($body['refid'])) {
-            $this -> log -> error('registerUser without refid');
+        if(!validateId($body['uid'])) {
+            $this -> log -> error('Ignoring registerUser with invalid uid');
+            return;
+        }
+        if(!validateId($body['refid'])) {
+            $this -> log -> error('Ignoring registerUser with invalid refid');
             return;
         }
         

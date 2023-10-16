@@ -7,12 +7,14 @@ class SettlementsAPI {
     private $log;
     private $amqp;
     private $settlements;
+    private $reflinks;
     private $rewards;
     
-    function __construct($log, $amqp, $settlements, $rewards) {
+    function __construct($log, $amqp, $settlements, $reflinks, $rewards) {
         $this -> log = $log;
         $this -> amqp = $amqp;
         $this -> settlements = $settlements;
+        $this -> reflinks = $reflinks;
         $this -> rewards = $rewards;
 
         $this -> log -> debug('Initialized settlements API');
@@ -59,10 +61,25 @@ class SettlementsAPI {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
+        if(isset($query['refid'])) {
+            $reflink = $this -> reflinks -> getReflink([
+                'refid' => $body['refid']
+            ]);
+        
+            if($reflink['uid'] != $auth['uid'])
+                throw new Error('FORBIDDEN', 'No permissions to reflink '.$query['refid'], 403);
+            
+            $refid = $query['refid'];
+            $uid = null;
+        }
+        else {
+            $refid = null;
+            $uid = $auth['uid'];
+        }
+        
         $resp = $this -> settlements -> getSettlements([
-            'uid' => $auth['uid'],
-            'active' => true,
-            'refid' => @$query['refid'],
+            'uid' => $uid,
+            'refid' => $refid,
             'offset' => @$query['offset'],
             'limit' => @$query['limit']
         ]);
@@ -77,13 +94,14 @@ class SettlementsAPI {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        return $this -> ptpSettlement(
-            $this -> settlements -> getSettlement([
-                'uid' => $auth['uid'],
-                'afseid' => $path['afseid'],
-                'active' => true
-            ])
-        );
+        $set = $this -> settlements -> getSettlement([
+            'afseid' => $path['afseid'],
+        ]);
+        
+        if($set['uid'] != $auth['uid'])
+            throw new Error('FORBIDDEN', 'No permissions to settlement '.$path['afseid'], 403);
+        
+        return $this -> ptpSettlement($set);
     }
     
     public function getRewards($path, $query, $body, $auth) {
@@ -92,10 +110,15 @@ class SettlementsAPI {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        $resp = $this -> rewards -> getRewards([
-            'uid' => $auth['uid'],
+        $set = $this -> settlements -> getSettlement([
             'afseid' => $path['afseid'],
-            'active' => true
+        ]);
+        
+        if($set['uid'] != $auth['uid'])
+            throw new Error('FORBIDDEN', 'No permissions to settlement '.$path['afseid'], 403);
+        
+        $resp = $this -> rewards -> getRewards([
+            'afseid' => $path['afseid']
         ]);
         
         $promises = [];
@@ -109,13 +132,13 @@ class SettlementsAPI {
                 
                 $promises[] = $this -> amqp -> call(
                     'wallet.wallet',
-                    'assetIdToSymbol',
+                    'getAsset',
                     [
                         'assetid' => $assetid
                     ]
                 ) -> then(
-                    function($symbol) use(&$mapAssets, $assetid) {
-                        $mapAssets[$assetid] = $symbol;
+                    function($asset) use(&$mapAssets, $assetid) {
+                        $mapAssets[$assetid] = $asset['symbol'];
                     }
                 );
             }

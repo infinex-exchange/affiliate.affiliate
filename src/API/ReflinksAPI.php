@@ -42,32 +42,60 @@ class ReflinksAPI {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        return $this -> ptpReflink(
-            $this -> reflinks -> getReflink([
-                'uid' => $auth['uid'],
-                'active' => true,
-                'refid' => $path['refid']
-            ])
-        );
+        $reflink = $this -> reflinks -> getReflink([
+            'refid' => $path['refid']
+        ]);
+        
+        if(!$reflink['active'])
+            throw new Error('NOT_FOUND', 'Reflink '.$path['refid'].' not found', 404);
+        
+        if($reflink['uid'] != $auth['uid'])
+            throw new Error('FORBIDDEN', 'No permissions to reflink '.$path['refid'], 403);
+        
+        return $this -> ptpReflink($reflink);
     }
     
     public function editReflink($path, $query, $body, $auth) {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
+        $reflink = $this -> reflinks -> getReflink([
+            'refid' => $path['refid']
+        ]);
+        
+        if(!$reflink['active'])
+            throw new Error('NOT_FOUND', 'Reflink '.$path['refid'].' not found', 404);
+        
+        if($reflink['uid'] != $auth['uid'])
+            throw new Error('FORBIDDEN', 'No permissions to reflink '.$path['refid'], 403);
+        
         $this -> reflinks -> editReflink([
-            'uid' => $auth['uid'],
             'refid' => $path['refid'],
             'description' => @$body['description']
         ]);
+        
+        return $this -> ptpReflink(
+            $this -> reflinks -> getReflink([
+                'refid' => $path['refid']
+            ])
+        );
     }
     
     public function deleteReflink($path, $query, $body, $auth) {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
+        
+        $reflink = $this -> reflinks -> getReflink([
+            'refid' => $path['refid']
+        ]);
+        
+        if(!$reflink['active'])
+            throw new Error('NOT_FOUND', 'Reflink '.$path['refid'].' not found', 404);
+        
+        if($reflink['uid'] != $auth['uid'])
+            throw new Error('FORBIDDEN', 'No permissions to reflink '.$path['refid'], 403);
     
         $this -> reflinks -> deleteReflink([
-            'uid' => $auth['uid'],
             'refid' => $path['refid']
         ]);
     }
@@ -81,9 +109,11 @@ class ReflinksAPI {
             'description' => @$body['description']
         ]);
         
-        return [
-            'refid' => $refid
-        ];
+        return $this -> ptpReflink(
+            $this -> reflinks -> getReflink([
+                'refid' => $refid
+            ])
+        );
     }
     
     private function ptpReflink($record) {

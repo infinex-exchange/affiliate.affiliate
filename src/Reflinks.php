@@ -2,6 +2,7 @@
 
 use Infinex\Exceptions\Error;
 use Infinex\Pagination;
+use function Infinex\Validation\validateId;
 use React\Promise;
 
 class Reflinks {
@@ -87,8 +88,10 @@ class Reflinks {
     }
     
     public function getReflinks($body) {
+        if(isset($body['uid']) && !validateId($body['uid']))
+            throw new Error('VALIDATION_ERROR', 'uid');
         if(isset($body['active']) && !is_bool($body['active']))
-            throw new Error('VALIDATION_ERROR', 'active', 400);
+            throw new Error('VALIDATION_ERROR', 'active');
         
         $pag = new Pagination\Offset(50, 500, $body);
         
@@ -134,11 +137,8 @@ class Reflinks {
         if(!isset($body['refid']))
             throw new Error('MISSING_DATA', 'refid', 400);
         
-        if(!$this -> validateRefid($body['refid']))
+        if(!validateId($body['refid']))
             throw new Error('VALIDATION_ERROR', 'refid', 400);
-        
-        if(isset($body['active']) && !is_bool($body['active']))
-            throw new Error('VALIDATION_ERROR', 'active', 400);
         
         $task = array(
             ':refid' => $body['refid']
@@ -150,16 +150,6 @@ class Reflinks {
                        active
                 FROM reflinks
                 WHERE refid = :refid';
-        
-        if(isset($body['uid'])) {
-            $task[':uid'] = $body['uid'];
-            $sql .= ' AND uid = :uid';
-        }
-        
-        if(isset($body['active'])) {
-            $task[':active'] = $body['active'] ? 1 : 0;
-            $sql .= ' AND active = :active';
-        }
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
@@ -175,7 +165,7 @@ class Reflinks {
         if(!isset($body['refid']))
             throw new Error('MISSING_DATA', 'refid', 400);
         
-        if(!$this -> validateRefid($body['refid']))
+        if(!validateId($body['refid']))
             throw new Error('VALIDATION_ERROR', 'refid', 400);
     
         $task = array(
@@ -185,14 +175,8 @@ class Reflinks {
         $sql = 'UPDATE reflinks
                 SET active = FALSE
                 WHERE refid = :refid
-                AND active = TRUE';
-        
-        if(isset($body['uid'])) {
-            $task[':uid'] = $body['uid'];
-            $sql .= ' AND uid = :uid';
-        }
-        
-        $sql .= ' RETURNING 1';
+                AND active = TRUE
+                RETURNING 1';
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
@@ -204,10 +188,12 @@ class Reflinks {
     
     public function createReflink($body) {
         if(!isset($body['uid']))
-            throw new Error('MISSING_DATA', 'uid', 400);
+            throw new Error('MISSING_DATA', 'uid');
         if(!isset($body['description']))
             throw new Error('MISSING_DATA', 'description', 400);
         
+        if(!validateId($body['uid']))
+            throw new Error('VALIDATION_ERROR', 'uid');
         if(!$this -> validateReflinkDescription($body['description']))
             throw new Error('VALIDATION_ERROR', 'description', 400);
         
@@ -260,35 +246,34 @@ class Reflinks {
         if(!isset($body['description']))
             throw new Error('MISSING_DATA', 'description', 400);
         
-        if(!$this -> validateRefid($body['refid']))
+        if(!validateId($body['refid']))
             throw new Error('VALIDATION_ERROR', 'refid', 400);
         if(!$this -> validateReflinkDescription($body['description']))
             throw new Error('VALIDATION_ERROR', 'description', 400);
         
-        if(isset($body['uid']))
-            $uid = $body['uid'];
-        else {
-            // Get uid
-            $task = array(
-                ':refid' => $body['refid']
-            );
-            
-            $sql = 'SELECT uid
-                    FROM reflinks
-                    WHERE refid = :refid
-                    AND active = TRUE';
-            
-            $q = $this -> pdo -> prepare($sql);
-            $q -> execute($task);
-            $row = $q -> fetch();
-            
-            if(!$row)
-                throw new Error('NOT_FOUND', 'Reflink '.$body['refid'].' not found', 404);
-            
-            $uid = $row['uid'];
-        }
-        
         $this -> pdo -> beginTransaction();
+        
+        // Get uid
+        $task = array(
+            ':refid' => $body['refid']
+        );
+        
+        $sql = 'SELECT uid
+                FROM reflinks
+                WHERE refid = :refid
+                AND active = TRUE
+                FOR UPDATE';
+        
+        $q = $this -> pdo -> prepare($sql);
+        $q -> execute($task);
+        $row = $q -> fetch();
+        
+        if(!$row) {
+            $this -> pdo -> rollBack();
+            throw new Error('NOT_FOUND', 'Reflink '.$body['refid'].' not found', 404);
+        }
+            
+        $uid = $row['uid'];
         
         // Check reflink with this name already exists
         $task = array(
@@ -307,7 +292,7 @@ class Reflinks {
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
-        $row = $q -> fetch(PDO::FETCH_ASSOC);
+        $row = $q -> fetch();
         
         if($row) {
             $this -> pdo -> rollBack();
@@ -315,30 +300,14 @@ class Reflinks {
         }
         
         // Update reflink
-        
         $sql = 'UPDATE reflinks
                 SET description = :description
-                WHERE uid = :uid
-                AND refid = :refid
-                AND active = TRUE
-                RETURNING 1';
+                WHERE refid = :refid';
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row) {
-            $this -> pdo -> rollBack();
-            throw new Error('NOT_FOUND', 'Reflink '.$body['refid'].' not found', 404);
-        }
         
         $this -> pdo -> commit();
-    }
-    
-    private function validateRefid($refid) {
-        if(!is_int($refid)) return false;
-        if($refid < 1) return false;
-        return true;
     }
     
     private function validateReflinkDescription($desc) {

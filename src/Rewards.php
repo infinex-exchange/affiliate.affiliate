@@ -1,6 +1,7 @@
 <?php
 
 use Infinex\Exceptions\Error;
+use function Infinex\Validation\validateId;
 use function Infinex\Math\trimFloat;
 use React\Promise;
 
@@ -8,13 +9,11 @@ class Rewards {
     private $log;
     private $amqp;
     private $pdo;
-    private $settlements;
     
-    function __construct($log, $amqp, $pdo, $settlements) {
+    function __construct($log, $amqp, $pdo) {
         $this -> log = $log;
         $this -> amqp = $amqp;
         $this -> pdo = $pdo;
-        $this -> settlements = $settlements;
 
         $this -> log -> debug('Initialized rewards manager');
     }
@@ -63,11 +62,8 @@ class Rewards {
         if(!isset($body['afseid']))
             throw new Error('MISSING_DATA', 'afseid', 400);
         
-        $this -> settlements -> getSettlement([
-            'afseid' => $body['afseid'],
-            'uid' => @$body['uid'],
-            'active' => @$body['active']
-        ]);
+        if(!validateId($body['afseid']))
+            throw new Error('VALIDATION_ERROR', 'afseid', 400);
         
         // Get rewards
         $task = [

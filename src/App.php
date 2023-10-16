@@ -2,8 +2,8 @@
 
 require __DIR__.'/Reflinks.php';
 require __DIR__.'/Settlements.php';
-require __DIR__.'/Affiliations.php';
 require __DIR__.'/Rewards.php';
+require __DIR__.'/Affiliations.php';
 
 require __DIR__.'/API/ReflinksAPI.php';
 require __DIR__.'/API/SettlementsAPI.php';
@@ -15,8 +15,8 @@ class App extends Infinex\App\App {
     
     private $reflinks;
     private $settlements;
-    private $affiliations;
     private $rewards;
+    private $affiliations;
     
     private $reflinksApi;
     private $settlementsApi;
@@ -44,8 +44,13 @@ class App extends Infinex\App\App {
             $this -> log,
             $this -> amqp,
             $this -> pdo,
-            $this -> reflinks,
             REFERENCE_COIN
+        );
+        
+        $this -> rewards = new Rewards(
+            $this -> log,
+            $this -> amqp,
+            $this -> pdo
         );
         
         $this -> affiliations = new Affiliations(
@@ -56,13 +61,6 @@ class App extends Infinex\App\App {
         );
         $this -> reflinks -> setAffiliations($this -> affiliations);
         
-        $this -> rewards = new Rewards(
-            $this -> log,
-            $this -> amqp,
-            $this -> pdo,
-            $this -> settlements
-        );
-        
         $this -> reflinksApi = new ReflinksAPI(
             $this -> log,
             $this -> reflinks
@@ -72,6 +70,7 @@ class App extends Infinex\App\App {
             $this -> log,
             $this -> amqp,
             $this -> settlements,
+            $this -> reflinks,
             $this -> rewards
         );
         
@@ -94,18 +93,15 @@ class App extends Infinex\App\App {
             }
         ) -> then(
             function() use($th) {
-                return $th -> reflinks -> start();
-            }
-        ) -> then(
-            function() use($th) {
                 return Promise\all([
+                    $th -> reflinks -> start(),
                     $th -> settlements -> start(),
-                    $th -> affiliations -> start()
+                    $th -> rewards -> start()
                 ]);
             }
         ) -> then(
             function() use($th) {
-                return $th -> rewards -> start();
+                return $th -> affiliations -> start();
             }
         ) -> then(
             function() use($th) {
@@ -123,18 +119,15 @@ class App extends Infinex\App\App {
         
         $this -> rest -> stop() -> then(
             function() use($th) {
+                return $th -> affiliations -> stop();
+            }
+        ) -> then(
+            function() use($th) {
                 return Promise\all([
+                    $th -> reflinks -> stop(),
                     $th -> settlements -> stop(),
-                    $th -> affiliations -> stop()
+                    $th -> rewards -> stop()
                 ]);
-            }
-        ) -> then(
-            function() use($th) {
-                return $th -> rewards -> stop();
-            }
-        ) -> then(
-            function() use($th) {
-                return $th -> reflinks -> stop();
             }
         ) -> then(
             function() use($th) {
