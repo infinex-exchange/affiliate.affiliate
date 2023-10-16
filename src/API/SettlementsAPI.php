@@ -63,7 +63,7 @@ class SettlementsAPI {
         
         if(isset($query['refid'])) {
             $reflink = $this -> reflinks -> getReflink([
-                'refid' => $body['refid']
+                'refid' => $query['refid']
             ]);
         
             if($reflink['uid'] != $auth['uid'])
