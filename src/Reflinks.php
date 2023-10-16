@@ -318,6 +318,7 @@ class Reflinks {
         return [
             'refid' => $row['refid'],
             'uid' => $row['uid'],
+            'active' => $row['active'],
             'description' => $row['description'],
             'members' => $this -> affiliations -> countMembers($row['refid'])
         ];
