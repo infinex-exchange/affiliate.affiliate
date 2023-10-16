@@ -300,6 +300,11 @@ class Reflinks {
         }
         
         // Update reflink
+        $task = [
+            ':description' => $body['description'],
+            ':refid' => $body['refid']
+        ];
+        
         $sql = 'UPDATE reflinks
                 SET description = :description
                 WHERE refid = :refid';
