@@ -6,6 +6,7 @@ create table reflinks(
     description varchar(255) not null,
     active boolean not null default true
 );
+create unique index on reflinks(uid, description) where active = TRUE;
 
 GRANT SELECT, INSERT, UPDATE ON reflinks TO "affiliate.affiliate";
 

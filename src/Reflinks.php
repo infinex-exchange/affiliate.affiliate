@@ -197,30 +197,6 @@ class Reflinks {
         if(!$this -> validateReflinkDescription($body['description']))
             throw new Error('VALIDATION_ERROR', 'description', 400);
         
-        $this -> pdo -> beginTransaction();
-    
-        // Check reflink with this name already exists
-        $task = array(
-            ':uid' => $body['uid'],
-            ':description' => $body['description']
-        );
-        
-        $sql = 'SELECT 1
-                FROM reflinks
-                WHERE uid = :uid
-                AND description = :description
-                AND active = TRUE
-                FOR UPDATE';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if($row) {
-            $this -> pdo -> rollBack();
-            throw new Error('CONFLICT', 'Reflink with this name already exists', 409);
-        }
-        
         // Insert reflink
         $sql = "INSERT INTO reflinks(
                     uid,
@@ -229,13 +205,15 @@ class Reflinks {
                     :uid,
                     :description
                 )
+                ON CONFLICT DO NOTHING
                 RETURNING refid";
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
         $row = $q -> fetch();
         
-        $this -> pdo -> commit();
+        if(!$row)
+            throw new Error('CONFLICT', 'Reflink with this name already exists', 409);
         
         return $row['refid'];
     }
@@ -251,54 +229,6 @@ class Reflinks {
         if(!$this -> validateReflinkDescription($body['description']))
             throw new Error('VALIDATION_ERROR', 'description', 400);
         
-        $this -> pdo -> beginTransaction();
-        
-        // Get uid
-        $task = array(
-            ':refid' => $body['refid']
-        );
-        
-        $sql = 'SELECT uid
-                FROM reflinks
-                WHERE refid = :refid
-                AND active = TRUE
-                FOR UPDATE';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row) {
-            $this -> pdo -> rollBack();
-            throw new Error('NOT_FOUND', 'Reflink '.$body['refid'].' not found', 404);
-        }
-            
-        $uid = $row['uid'];
-        
-        // Check reflink with this name already exists
-        $task = array(
-            ':uid' => $uid,
-            ':description' => $body['description'],
-            ':refid' => $body['refid']
-        );
-        
-        $sql = 'SELECT 1
-                FROM reflinks
-                WHERE uid = :uid
-                AND description = :description
-                AND refid != :refid
-                AND active = TRUE
-                FOR UPDATE';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if($row) {
-            $this -> pdo -> rollBack();
-            throw new Error('CONFLICT', 'Reflink with this name already exists', 409);
-        }
-        
         // Update reflink
         $task = [
             ':description' => $body['description'],
@@ -307,12 +237,19 @@ class Reflinks {
         
         $sql = 'UPDATE reflinks
                 SET description = :description
-                WHERE refid = :refid';
+                WHERE refid = :refid
+                RETURNING 1';
         
         $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
+        try {
+            $q -> execute($task);
+        } catch(\PDOException $e) {
+            if($e -> getCode() != 23505) throw $e;
+            throw new Error('CONFLICT', 'Reflink with this name already exists', 409);
+        }
         
-        $this -> pdo -> commit();
+        if(!$q -> fetch())
+            throw new Error('NOT_FOUND', 'Reflink '.$body['refid'].' not found', 404);
     }
     
     private function validateReflinkDescription($desc) {
