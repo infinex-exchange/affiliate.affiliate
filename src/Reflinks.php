@@ -198,6 +198,11 @@ class Reflinks {
             throw new Error('VALIDATION_ERROR', 'description', 400);
         
         // Insert reflink
+        $task = [
+            ':uid' => $body['uid'],
+            ':description' => $body['description']
+        ];
+        
         $sql = "INSERT INTO reflinks(
                     uid,
                     description
