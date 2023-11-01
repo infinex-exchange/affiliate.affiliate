@@ -1,18 +1,15 @@
 <?php
 
 use Infinex\Exceptions\Error;
-use React\Promise;
 
 class SettlementsAPI {
     private $log;
-    private $amqp;
     private $settlements;
     private $reflinks;
     private $rewards;
     
-    function __construct($log, $amqp, $settlements, $reflinks, $rewards) {
+    function __construct($log, $settlements, $reflinks, $rewards) {
         $this -> log = $log;
-        $this -> amqp = $amqp;
         $this -> settlements = $settlements;
         $this -> reflinks = $reflinks;
         $this -> rewards = $rewards;
@@ -121,37 +118,10 @@ class SettlementsAPI {
             'afseid' => $path['afseid']
         ]);
         
-        $promises = [];
-        $mapAssets = [];
+        foreach($resp['rewards'] as $k => $v)
+            $resp['rewards'][$k] = $th -> ptpReward($v);
         
-        foreach($resp['rewards'] as $record) {
-            $assetid = $record['assetid'];
-            
-            if(!array_key_exists($assetid, $mapAssets)) {
-                $mapAssets[$assetid] = null;
-                
-                $promises[] = $this -> amqp -> call(
-                    'wallet.wallet',
-                    'getAsset',
-                    [
-                        'assetid' => $assetid
-                    ]
-                ) -> then(
-                    function($asset) use(&$mapAssets, $assetid) {
-                        $mapAssets[$assetid] = $asset['symbol'];
-                    }
-                );
-            }
-        }
-        
-        return Promise\all($promises) -> then(
-            function() use(&$mapAssets, $resp, $th) {
-                foreach($resp['rewards'] as $k => $v)
-                    $resp['rewards'][$k] = $th -> ptpReward($v, $mapAssets[ $v['assetid'] ]);
-                
-                return $resp;
-            }
-        );
+        return $resp;
     }
     
     private function ptpAggSettlement($record) {
@@ -174,12 +144,12 @@ class SettlementsAPI {
         ];
     }
     
-    private function ptpReward($record, $assetSymbol) {
+    private function ptpReward($record) {
         return [
             'type' => $record['type'],
             'slaveLevel' => $record['slaveLevel'],
             'amount' => $record['amount'],
-            'asset' => $assetSymbol
+            'assetid' => $record['assetid']
         ];
     }
 }
